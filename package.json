@@ -1,12 +1,12 @@
 {
   "name": "com.unityessentials.rendering.camera.globalrefreshrate",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "displayName": "Rendering GlobalRefreshRate",
   "description": "This is a part of the UnityEssentials Ecosystem",
   "unity": "6000.0",
   "unityRelease": "",
   "dependencies": {
-    "com.unityessentials.editor.hooks.playerloop": "2.0.0"
+    "com.unityessentials.editor.hooks.playerloop": "~2.0.0"
   },
   "keywords": [],
   "author": {
