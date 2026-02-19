@@ -21,7 +21,6 @@ namespace UnityEssentials
         {
             SetTarget(_targetRefreshRate);
             _lastFrameTicks = Stopwatch.GetTimestamp();
-            QualitySettings.vSyncCount = 0;
             PlayerLoopHook.Add<Update>(Tick);
         }
 
@@ -37,7 +36,7 @@ namespace UnityEssentials
             if (refreshRate <= 0f)
             {
                 UnityEngine.Debug.LogWarning($"GlobalRefreshRateLimiter: Invalid refreshRate {refreshRate}. Falling back to 60 FPS.");
-                refreshRate = 60f;
+                refreshRate = 1000f;
             }
 
             _targetRefreshRate = refreshRate;
@@ -62,7 +61,7 @@ namespace UnityEssentials
 
     public static partial class GlobalRefreshRate
     {
-        private static float _targetRefreshRate = 60.0f;
+        private static float _targetRefreshRate = 1000f;
         private static long _targetFrameTimeTicks;
         private static long _lastFrameTicks;
         private static long _frequency;
@@ -120,8 +119,8 @@ namespace UnityEssentials
                     continue;
                 }
 
-                // Final tight spin (very short)
-                SpinUntil(targetTimestamp);
+                // // Final tight spin (very short)
+                // SpinUntil(targetTimestamp);
                 return;
             }
         }
