@@ -20,7 +20,11 @@ namespace UnityEssentials
         public static void Initialize()
         {
             SetTarget(_targetRefreshRate);
-            _lastFrameTicks = Stopwatch.GetTimestamp();
+            _frequency = Stopwatch.Frequency;
+
+            long now = Stopwatch.GetTimestamp();
+            _nextFrameTicks = now + _targetFrameTimeTicks;
+
             PlayerLoopHook.Add<Update>(Tick);
         }
 
@@ -28,20 +32,27 @@ namespace UnityEssentials
         /// Sets the target refresh rate for the update loop.
         /// </summary>
         /// <remarks>This method adjusts the internal timing calculations to achieve the specified frame
-        /// rate. Providing a value less than or equal to 0 may result in undefined behavior.</remarks>
+        /// rate.</remarks>
         /// <param name="refreshRate">The desired target FPS. Must be greater than 0.</param>
         public static void SetTarget(float refreshRate)
         {
-            // Guard against invalid values to prevent division by zero
-            if (refreshRate <= 0f)
+            // Guard against invalid values to prevent division by zero / NaN.
+            if (float.IsNaN(refreshRate) || float.IsInfinity(refreshRate) || refreshRate <= 0f)
             {
-                UnityEngine.Debug.LogWarning($"GlobalRefreshRateLimiter: Invalid refreshRate {refreshRate}. Falling back to 60 FPS.");
-                refreshRate = 1000f;
+                UnityEngine.Debug.LogWarning($"GlobalRefreshRate: Invalid refreshRate {refreshRate}. Falling back to 60 FPS.");
+                refreshRate = 60f;
             }
 
             _targetRefreshRate = refreshRate;
             _frequency = Stopwatch.Frequency;
             _targetFrameTimeTicks = (long)(_frequency / (double)_targetRefreshRate);
+
+            // If we're already running, reschedule from now to avoid carrying an old cadence across rate changes.
+            if (_frequency > 0)
+            {
+                long now = Stopwatch.GetTimestamp();
+                _nextFrameTicks = now + _targetFrameTimeTicks;
+            }
         }
 
         private static void Tick()
@@ -63,33 +74,49 @@ namespace UnityEssentials
     {
         private static float _targetRefreshRate = 1000f;
         private static long _targetFrameTimeTicks;
-        private static long _lastFrameTicks;
+        private static long _nextFrameTicks;
         private static long _frequency;
 
         /// <summary>
-        /// Regulates the refresh rate by ensuring a consistent time interval between frames.
+        /// Runs work, then waits until the next fixed frame boundary (drift-free).
         /// </summary>
-        /// <remarks>This method calculates the time elapsed since the last frame and, if necessary,
-        /// delays execution  to maintain the target refresh rate. It invokes the <see cref="OnTick"/> delegate to
-        /// perform rendering  operations during each frame. The method uses high-resolution performance counters to
-        /// measure time  intervals accurately.</remarks>
         private static void FrameLimiter()
         {
-            // invoke tick handlers
+            // 1) Run simulation / user tick.
             OnTick?.Invoke();
 
-            long currentTicksAfterRender = Stopwatch.GetTimestamp();
+            // 2) Wait until the pre-scheduled boundary.
+            //    Do NOT compute the next boundary from "now"; keep a fixed schedule to avoid drift.
+            long now = Stopwatch.GetTimestamp();
 
-            long elapsedTicks = currentTicksAfterRender - _lastFrameTicks;
-            long remainingTicks = _targetFrameTimeTicks - elapsedTicks;
+            // If uninitialized, schedule the first boundary one frame ahead.
+            if (_nextFrameTicks <= 0)
+                _nextFrameTicks = now + _targetFrameTimeTicks;
 
-            if (remainingTicks > 0)
-            {
-                long targetTicks = currentTicksAfterRender + remainingTicks;
-                HighPrecisionWait.WaitUntil(targetTicks, _frequency);
-                _lastFrameTicks = targetTicks;
-            }
-            else _lastFrameTicks = currentTicksAfterRender;
+            if (now < _nextFrameTicks)
+                HighPrecisionWait.WaitUntil(_nextFrameTicks, _frequency);
+
+            // 3) Advance cadence deterministically.
+            _nextFrameTicks += _targetFrameTimeTicks;
+
+            // 4) If we fell far behind (e.g., breakpoint/GC spike), resync so we don't try to "catch up" forever.
+            long afterWait = Stopwatch.GetTimestamp();
+            if (afterWait > _nextFrameTicks + _targetFrameTimeTicks)
+                _nextFrameTicks = afterWait + _targetFrameTimeTicks;
+        }
+
+        [Console("globalRefreshRate", "Gets/sets GlobalRefreshRate target FPS. Usage: globalRefreshRate or globalRefreshRate <fps>")]
+        private static string ConsoleGlobalRefreshRate(string args)
+        {
+            args = (args ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(args))
+                return $"GlobalRefreshRate = {_targetRefreshRate:0.###} FPS";
+
+            if (!float.TryParse(args, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fps))
+                return "Invalid number. Usage: globalRefreshRate <fps>";
+
+            SetTarget(fps);
+            return $"GlobalRefreshRate = {_targetRefreshRate:0.###} FPS";
         }
     }
 
@@ -119,8 +146,8 @@ namespace UnityEssentials
                     continue;
                 }
 
-                // // Final tight spin (very short)
-                // SpinUntil(targetTimestamp);
+                // Final tight spin (very short)
+                SpinUntil(targetTimestamp);
                 return;
             }
         }
