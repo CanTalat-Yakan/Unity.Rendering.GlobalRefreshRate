@@ -19,6 +19,7 @@ namespace UnityEssentials
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         public static void Initialize()
         {
+            // Default is unlimited unless a consumer explicitly sets a limit.
             SetTarget(_targetRefreshRate);
             _frequency = Stopwatch.Frequency;
 
@@ -31,20 +32,33 @@ namespace UnityEssentials
         /// <summary>
         /// Sets the target refresh rate for the update loop.
         /// </summary>
-        /// <remarks>This method adjusts the internal timing calculations to achieve the specified frame
-        /// rate.</remarks>
-        /// <param name="refreshRate">The desired target FPS. Must be greater than 0.</param>
+        /// <remarks>
+        /// Pass a value <= 0 to disable the limiter (unlimited). Note that Unity rendering may still be capped
+        /// by VSync (QualitySettings.vSyncCount) or Application.targetFrameRate.
+        /// </remarks>
+        /// <param name="refreshRate">Target FPS. Use <= 0 for unlimited.</param>
         public static void SetTarget(float refreshRate)
         {
-            // Guard against invalid values to prevent division by zero / NaN.
-            if (float.IsNaN(refreshRate) || float.IsInfinity(refreshRate) || refreshRate <= 0f)
+            // NaN/Infinity are always invalid.
+            if (float.IsNaN(refreshRate) || float.IsInfinity(refreshRate))
             {
-                UnityEngine.Debug.LogWarning($"GlobalRefreshRate: Invalid refreshRate {refreshRate}. Falling back to 60 FPS.");
-                refreshRate = 60f;
+                UnityEngine.Debug.LogWarning(
+                    $"GlobalRefreshRate: Invalid refreshRate {refreshRate}. Disabling limiter (unlimited)."
+                );
+                refreshRate = 0f;
             }
 
             _targetRefreshRate = refreshRate;
             _frequency = Stopwatch.Frequency;
+
+            // <= 0 means unlimited: no waiting.
+            if (_targetRefreshRate <= 0f)
+            {
+                _targetFrameTimeTicks = 0;
+                _nextFrameTicks = 0;
+                return;
+            }
+
             _targetFrameTimeTicks = (long)(_frequency / (double)_targetRefreshRate);
 
             // If we're already running, reschedule from now to avoid carrying an old cadence across rate changes.
@@ -72,11 +86,13 @@ namespace UnityEssentials
 
     public static partial class GlobalRefreshRate
     {
-        private static float _targetRefreshRate = 1000f;
+        private static float _targetRefreshRate = 0f;
         private static long _targetFrameTimeTicks;
         private static long _nextFrameTicks;
         private static long _frequency;
 
+        public static float GetTarget() => _targetRefreshRate;
+        
         /// <summary>
         /// Runs work, then waits until the next fixed frame boundary (drift-free).
         /// </summary>
@@ -84,6 +100,10 @@ namespace UnityEssentials
         {
             // 1) Run simulation / user tick.
             OnTick?.Invoke();
+
+            // Unlimited / disabled limiter.
+            if (_targetFrameTimeTicks <= 0)
+                return;
 
             // 2) Wait until the pre-scheduled boundary.
             //    Do NOT compute the next boundary from "now"; keep a fixed schedule to avoid drift.
@@ -103,20 +123,6 @@ namespace UnityEssentials
             long afterWait = Stopwatch.GetTimestamp();
             if (afterWait > _nextFrameTicks + _targetFrameTimeTicks)
                 _nextFrameTicks = afterWait + _targetFrameTimeTicks;
-        }
-
-        [Console("globalRefreshRate", "Gets/sets GlobalRefreshRate target FPS. Usage: globalRefreshRate or globalRefreshRate <fps>")]
-        private static string ConsoleGlobalRefreshRate(string args)
-        {
-            args = (args ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(args))
-                return $"GlobalRefreshRate = {_targetRefreshRate:0.###} FPS";
-
-            if (!float.TryParse(args, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fps))
-                return "Invalid number. Usage: globalRefreshRate <fps>";
-
-            SetTarget(fps);
-            return $"GlobalRefreshRate = {_targetRefreshRate:0.###} FPS";
         }
     }
 
