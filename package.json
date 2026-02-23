@@ -1,6 +1,6 @@
 {
   "name": "com.unityessentials.rendering.camera.globalrefreshrate",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "displayName": "Rendering GlobalRefreshRate",
   "description": "This is a part of the UnityEssentials Ecosystem",
   "unity": "6000.0",
